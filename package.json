@@ -10,6 +10,8 @@
     "dev": "concurrently \"npm run dev -w server\" \"npm run dev -w frontend\"",
     "dev:server": "npm run dev -w server",
     "dev:frontend": "npm run dev -w frontend",
+    "build": "npm run build -w frontend",
+    "build:frontend": "npm run build -w frontend",
     "lint": "eslint \"frontend/src/**/*.{js,jsx}\" \"server/**/*.js\"",
     "format": "prettier --write \"**/*.{js,jsx,json,md,css}\"",
     "test": "npm run test -w server"
