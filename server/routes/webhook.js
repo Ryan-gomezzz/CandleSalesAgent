@@ -1,6 +1,6 @@
 const express = require('express');
 const { appendLeadEvent, updateLead } = require('../lib/db');
-const { verifyWebhookSignature } = require('../lib/exotelClient');
+const { verifyWebhookSignature } = require('../lib/vapiClient');
 const { logCallEvent } = require('../lib/logger');
 
 const router = express.Router();
@@ -12,28 +12,17 @@ router.post('/', async (req, res) => {
 
   const payload = req.body || {};
   
-  // Exotel webhook format: payload.CallStatus, payload.CallSid, payload.CustomField
-  // CustomField contains our JSON context with leadId
+  // VAPI webhook format: payload.event (call.created, call.answered, call.completed, etc.)
+  // payload.context contains our leadId and name
   let leadId = payload?.context?.leadId || payload?.leadId;
-  if (!leadId && payload?.CustomField) {
-    try {
-      const customField = typeof payload.CustomField === 'string' 
-        ? JSON.parse(payload.CustomField) 
-        : payload.CustomField;
-      leadId = customField?.leadId;
-    } catch (e) {
-      // Ignore parsing errors
-    }
-  }
-
+  
   if (!leadId) {
     logCallEvent({ type: 'webhook.unknownLead', payload });
     return res.json({ ok: true });
   }
 
-  // Exotel CallStatus values: queued, ringing, in-progress, completed, failed, busy, no-answer, canceled
-  const callStatus = payload?.CallStatus || payload?.Status || payload?.event || payload?.type || 'unknown';
-  const eventType = normalizeExotelEvent(callStatus);
+  // VAPI event types: call.created, call.answered, call.completed, call.failed, transcription, etc.
+  const eventType = payload?.event || payload?.type || payload?.status || 'unknown';
 
   try {
     await appendLeadEvent(leadId, { eventType, payload });
@@ -59,23 +48,9 @@ router.post('/', async (req, res) => {
 });
 
 /**
- * Normalize Exotel call status to internal event types
- * Exotel statuses: queued, ringing, in-progress, completed, failed, busy, no-answer, canceled
+ * Derive status updates from VAPI webhook events
+ * VAPI event types: call.created, call.answered, call.completed, call.failed, transcription, etc.
  */
-function normalizeExotelEvent(status) {
-  const statusMap = {
-    queued: 'call.created',
-    ringing: 'call.ringing',
-    'in-progress': 'call.answered',
-    completed: 'call.completed',
-    failed: 'call.failed',
-    busy: 'call.busy',
-    'no-answer': 'call.no_answer',
-    canceled: 'call.canceled',
-  };
-  return statusMap[status?.toLowerCase()] || status || 'unknown';
-}
-
 function deriveStatusUpdates(eventType, payload) {
   const updates = { updatedAt: new Date().toISOString() };
   const eventMap = {
@@ -92,6 +67,7 @@ function deriveStatusUpdates(eventType, payload) {
     'call.busy': 'busy',
     'call.no_answer': 'no_answer',
     'call.canceled': 'canceled',
+    'call.ended': 'completed',
     consent_withdrawn: 'dnc',
   };
 
@@ -99,38 +75,39 @@ function deriveStatusUpdates(eventType, payload) {
     updates.status = eventMap[eventType];
   }
 
-  // Exotel may send transcription/recording URL in different fields
+  // VAPI transcription format: payload.transcription or payload.transcript
   const transcription =
-    payload?.Transcription ||
     payload?.transcription?.text ||
     payload?.transcription ||
     payload?.transcript ||
-    payload?.CallTranscript ||
+    payload?.message?.transcription ||
     payload?.summary;
 
   if (transcription) {
     updates.transcription = String(transcription).slice(0, 2000);
   }
 
-  // Store Exotel CallSid
-  if (payload?.CallSid || payload?.Sid) {
-    updates.exotelCallSid = payload.CallSid || payload.Sid;
+  // Store VAPI call ID
+  if (payload?.call?.id || payload?.callId || payload?.id) {
+    updates.vapiCallId = payload.call?.id || payload.callId || payload.id;
   }
 
-  // Store recording URL if available
-  if (payload?.RecordingUrl || payload?.Recording) {
-    updates.recordingUrl = payload.RecordingUrl || payload.Recording;
+  // Store recording URL if available (VAPI may provide this)
+  if (payload?.recording?.url || payload?.recordingUrl || payload?.recording) {
+    updates.recordingUrl = payload.recording?.url || payload.recordingUrl || payload.recording;
   }
 
   // Store call duration if available
-  if (payload?.Duration) {
-    updates.callDuration = payload.Duration;
+  if (payload?.duration || payload?.call?.duration) {
+    updates.callDuration = payload.duration || payload.call?.duration;
   }
 
+  // Store interested contact details if available
   const interestedContact =
     payload?.metadata?.interested_contact ||
     payload?.context?.interested_contact ||
-    payload?.notes?.contact_details;
+    payload?.notes?.contact_details ||
+    payload?.message?.metadata?.interested_contact;
 
   if (interestedContact) {
     updates.interestedContact = interestedContact;

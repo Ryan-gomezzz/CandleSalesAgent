@@ -1,13 +1,13 @@
 # CandleSalesAgent
 
-Full-stack reference implementation for the Candle & Co outbound sales workflow. Visitors submit an enquiry form, the backend saves the lead (DynamoDB or local JSON fallback) and triggers an outbound voice call through Exotel using the Candle & Co “Maya” system prompt. An admin UI lists leads for manual review.
+Full-stack reference implementation for the Candle & Co outbound sales workflow. Visitors submit an enquiry form, the backend saves the lead (DynamoDB or local JSON fallback) and triggers an outbound voice call through VAPI (Voice AI Platform) using the Candle & Co "Maya" system prompt. VAPI uses Twilio for telephony behind the scenes. An admin UI lists leads for manual review.
 
 ## Highlights
 
 - React + Vite + Tailwind landing/enquiry/admin pages with responsive layout and warm, serif-led branding.
 - Express API with `/enquire`, `/webhook`, `/admin/leads`, and `/admin/retry/:leadId`, rate limited and CORS protected.
 - AWS DynamoDB (DocumentClient) persistence with transparent fallback to `data/leads.json` when `USE_DYNAMODB=false`.
-- Exotel telephony integration with exponential retries, webhook signature verification, call event logging, and call flow handler for AI integration.
+- VAPI (Voice AI Platform) integration with exponential retries, webhook signature verification, and call event logging. VAPI handles Twilio telephony integration automatically.
 - System prompt stored at `server/prompts/candle_maya_system_prompt.txt` and reused everywhere.
 - Jest test stub for `/enquire`, ESLint + Prettier configs, and utility scripts for table creation and prompt uploads.
 
@@ -38,11 +38,14 @@ Copy `.env.example` to `.env` at the repo root. Keys:
 | `WEBHOOK_PUBLIC_BASE` | Public base URL for webhook callbacks (use ngrok URL in dev). |
 | `ADMIN_TOKEN` | Shared secret required for admin API/UI (set a strong random string). |
 | `DEFAULT_COUNTRY_CODE` | Defaults to `+91` for phone normalization. |
-| `EXOTEL_ACCOUNT_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN` | Exotel account credentials from dashboard. |
-| `EXOTEL_EXOPHONE_NUMBER` | Your Exotel phone number (ExoPhone) for outbound calls (e.g., `+91XXXXXXXXXX`). |
-| `EXOTEL_CALL_FLOW_URL` | URL to call flow handler for AI integration (e.g., `https://your-domain.com/callflow`). |
-| `EXOTEL_FLOW_ID` | Optional: Exotel Flow ID if configured in dashboard (alternative to URL). |
-| `EXOTEL_WEBHOOK_SECRET` | Optional: Webhook signature secret from Exotel dashboard. |
+| `VAPI_API_URL` | VAPI API endpoint (default: `https://api.vapi.ai/phone-call`). |
+| `VAPI_API_KEY` | Your VAPI API key from dashboard (starts with `sk-`). |
+| `VAPI_WEBHOOK_SECRET` | Optional: Webhook signature secret from VAPI dashboard. |
+| `CALLER_ID` | Outbound caller phone number (e.g., `+91XXXXXXXXXX`). VAPI handles Twilio integration. |
+| `USE_PROMPT_INLINE` | Set to `true` to use inline system prompt (default), or `false` to use uploaded flow. |
+| `PROMPT_FLOW_ID` | Optional: Flow ID if using uploaded prompt/flow instead of inline prompt. |
+| `VAPI_VOICE_ID` | Optional: Voice ID for AI agent (check VAPI dashboard for available voices). |
+| `VAPI_LANGUAGE_CODE` | Optional: Language code (default: `en-IN` for Indian English). |
 | `USE_DYNAMODB`, `DYNAMODB_TABLE`, `AWS_REGION`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` | DynamoDB configuration. Set `USE_DYNAMODB=false` for local JSON fallback. |
 | `LOG_FILE_PATH` | Optional override for call event logging (defaults to `logs/calls.log`). |
 
@@ -86,34 +89,37 @@ Copy `.env.example` to `.env` at the repo root. Keys:
   - Set `USE_DYNAMODB=false` to use `data/leads.json`.  
   - This is ideal for quick local testing without AWS.
 
-## Exotel integration
+## VAPI integration
 
-- **Setup Exotel account:**
-  1. Sign up at [exotel.com](https://exotel.com/) and get your Account SID, API Key, and API Token from the dashboard.
-  2. Configure an ExoPhone number (your Exotel phone number) for outbound calls.
-  3. Set `EXOTEL_ACCOUNT_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, and `EXOTEL_EXOPHONE_NUMBER` in `.env`.
+- **Setup VAPI account:**
+  1. Sign up at [vapi.ai](https://vapi.ai/) and get your API key from the dashboard.
+  2. Configure a phone number in VAPI dashboard (VAPI handles Twilio integration automatically).
+  3. Set `VAPI_API_URL`, `VAPI_API_KEY`, and `CALLER_ID` in `.env`.
 
-- **Call flow for AI voice integration:**
-  - Option 1: Use Exotel Passthru applet to connect to your AI service (recommended for AI voice conversations).
-  - Option 2: Configure call flow in Exotel dashboard pointing to `https://your-domain.com/callflow` endpoint.
-  - Option 3: Use Exotel's voice bot service if available.
-  - See `server/routes/callflow.js` for example XML call flow structure.
+- **System prompt configuration:**
+  - The system prompt is stored at `server/prompts/candle_maya_system_prompt.txt`.
+  - By default, `USE_PROMPT_INLINE=true` sends the prompt directly with each call.
+  - Alternatively, upload the prompt to VAPI and set `USE_PROMPT_INLINE=false` with `PROMPT_FLOW_ID`.
 
 - **Webhook configuration:**
   - Set `WEBHOOK_PUBLIC_BASE` to your production domain or ngrok URL.
-  - Configure webhook URL in Exotel dashboard: `https://your-domain.com/webhook`
-  - Enable webhook events: Call Status (ringing, in-progress, completed, failed, etc.)
-  - Set `EXOTEL_WEBHOOK_SECRET` if signature verification is enabled in Exotel dashboard.
+  - Configure webhook URL in VAPI dashboard: `https://your-domain.com/webhook`
+  - Enable webhook events: `call.created`, `call.answered`, `call.completed`, `call.failed`, `transcription`, etc.
+  - Set `VAPI_WEBHOOK_SECRET` if signature verification is enabled in VAPI dashboard.
 
-- **Documentation:** See `server/lib/exotelClient.js` for implementation details and Exotel API reference at [developer.exotel.com](https://developer.exotel.com/api).
+- **AI voice configuration:**
+  - VAPI handles AI voice conversations automatically (uses GPT/Claude for responses).
+  - Set `VAPI_VOICE_ID` to customize the AI voice (check VAPI dashboard for available voices).
+  - Set `VAPI_LANGUAGE_CODE` for language customization (default: `en-IN`).
+
+- **Documentation:** See `server/lib/vapiClient.js` for implementation details and VAPI API reference at [docs.vapi.ai](https://docs.vapi.ai/).
 
 ## API endpoints
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `POST /enquire` | Validates consent + phone, saves lead, triggers outbound call via Exotel (rate-limited to 3/min per IP). |
-| `POST /webhook` | Accepts Exotel webhook events, verifies signature (if configured), updates lead status/transcriptions. |
-| `POST /callflow` | Exotel call flow handler endpoint (returns XML). Use for AI voice integration with Passthru applet. |
+| `POST /enquire` | Validates consent + phone, saves lead, triggers outbound call via VAPI (rate-limited to 3/min per IP). |
+| `POST /webhook` | Accepts VAPI webhook events, verifies signature (if configured), updates lead status/transcriptions. |
 | `GET /admin/leads` | Requires `Authorization: Bearer <ADMIN_TOKEN>`. Returns sorted leads for admin UI. |
 | `POST /admin/retry/:leadId` | Admin-only manual requeue for failed leads. |
 | `GET /health` | Simple readiness probe. |
@@ -140,17 +146,17 @@ Copy `.env.example` to `.env` at the repo root. Keys:
    - Deploy server from `server/` directory (Render Node service or Cloud Run container).
 2. **Configure environment variables on the host**
    - Server: `PORT`, `FRONTEND_URL`, `WEBHOOK_PUBLIC_BASE`, `ADMIN_TOKEN`.
-   - Exotel: `EXOTEL_ACCOUNT_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, `EXOTEL_EXOPHONE_NUMBER`, `EXOTEL_CALL_FLOW_URL`, `EXOTEL_WEBHOOK_SECRET` (optional).
+   - VAPI: `VAPI_API_URL`, `VAPI_API_KEY`, `CALLER_ID`, `VAPI_WEBHOOK_SECRET` (optional), `USE_PROMPT_INLINE`, `PROMPT_FLOW_ID` (if applicable), `VAPI_VOICE_ID` (optional), `VAPI_LANGUAGE_CODE` (optional).
    - Database: `USE_DYNAMODB=true`, `DYNAMODB_TABLE`, `AWS_REGION`, plus AWS credentials or attach an IAM role.
 3. **Provision data layer**
    - Run `node scripts/create-dynamodb-table.js` locally with prod credentials or create `CandleSalesLeads` via AWS console.
 4. **Deploy**
    - Render: point service to `server/index.js`, enable build command `npm install && npm run build` (if bundling) and start command `npm run start`.
    - Cloud Run: build Docker image (e.g., `gcloud builds submit`) and deploy; expose port 3000.
-5. **Hook up Exotel webhooks**
-   - Configure webhook URL in Exotel dashboard: `https://your-domain.com/webhook`
-   - Enable webhook events: Call Status updates (queued, ringing, in-progress, completed, failed, busy, no-answer, canceled)
-   - Set `EXOTEL_WEBHOOK_SECRET` if signature verification is enabled in Exotel dashboard.
+5. **Hook up VAPI webhooks**
+   - Configure webhook URL in VAPI dashboard: `https://your-domain.com/webhook`
+   - Enable webhook events: `call.created`, `call.answered`, `call.completed`, `call.failed`, `transcription`, etc.
+   - Set `VAPI_WEBHOOK_SECRET` if signature verification is enabled in VAPI dashboard.
    - Ensure `WEBHOOK_PUBLIC_BASE` matches the final public URL.
 6. **Smoke test**
    - Submit an enquiry with a reachable phone number.
@@ -160,27 +166,27 @@ Copy `.env.example` to `.env` at the repo root. Keys:
 
 ## Manual steps after deployment (must-do checklist)
 
-1. **Exotel account setup:**
-   - Sign up at [exotel.com](https://exotel.com/) and get your Account SID, API Key, API Token from the dashboard.
-   - Configure an ExoPhone number (your Exotel phone number) for outbound calls.
-   - Populate `.env` with `EXOTEL_ACCOUNT_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`, and `EXOTEL_EXOPHONE_NUMBER`.
+1. **VAPI account setup:**
+   - Sign up at [vapi.ai](https://vapi.ai/) and get your API key from the dashboard.
+   - Configure a phone number in VAPI dashboard (VAPI handles Twilio integration automatically).
+   - Populate `.env` with `VAPI_API_URL`, `VAPI_API_KEY`, and `CALLER_ID`.
 
 2. **Provision DynamoDB table:**
    - Create via AWS console or run `node scripts/create-dynamodb-table.js` with production credentials.
    - Ensure AWS credentials or IAM role have DynamoDB permissions.
 
-3. **Configure webhooks and call flow:**
+3. **Configure webhooks:**
    - Obtain a public HTTPS URL (ngrok for dev, domain for prod) and set `WEBHOOK_PUBLIC_BASE`.
-   - Configure webhook URL in Exotel dashboard: `https://your-domain.com/webhook`
-   - Set up call flow URL: `EXOTEL_CALL_FLOW_URL=https://your-domain.com/callflow` (for AI integration) or use Exotel dashboard Flow ID.
+   - Configure webhook URL in VAPI dashboard: `https://your-domain.com/webhook`
+   - Enable webhook events: `call.created`, `call.answered`, `call.completed`, `call.failed`, `transcription`, etc.
 
 4. **Review system prompt:**
    - Check `server/prompts/candle_maya_system_prompt.txt` and adjust wording if needed for brand voice.
 
-5. **AI voice integration (optional):**
-   - For AI voice conversations, configure Exotel Passthru applet to connect to your AI service.
-   - Or use Exotel's voice bot service if available.
-   - See `server/routes/callflow.js` for call flow XML examples.
+5. **AI voice configuration (optional):**
+   - VAPI handles AI voice conversations automatically using GPT/Claude.
+   - Set `VAPI_VOICE_ID` to customize the AI voice (check VAPI dashboard for available voices).
+   - Set `VAPI_LANGUAGE_CODE` for language customization (default: `en-IN`).
 
 6. **Test end-to-end:**
    - Place at least one real test call and confirm webhook events are received.
@@ -188,15 +194,15 @@ Copy `.env.example` to `.env` at the repo root. Keys:
 
 7. **Security:**
    - Store `ADMIN_TOKEN` securely, rotate it before go-live, and share only with trusted operators.
-   - Set `EXOTEL_WEBHOOK_SECRET` if signature verification is enabled in Exotel dashboard.
+   - Set `VAPI_WEBHOOK_SECRET` if signature verification is enabled in VAPI dashboard.
 
 ## Troubleshooting
 
-- **Call creation fails immediately:** Check `EXOTEL_EXOPHONE_NUMBER`, Exotel credentials (`EXOTEL_ACCOUNT_SID`, `EXOTEL_API_KEY`, `EXOTEL_API_TOKEN`), and `logs/calls.log`. The server also records the last provider error on each lead.
-- **Webhook signature errors:** Ensure `EXOTEL_WEBHOOK_SECRET` matches Exotel dashboard settings; set it to empty during local testing if signatures aren't supported.
+- **Call creation fails immediately:** Check `CALLER_ID`, VAPI credentials (`VAPI_API_URL`, `VAPI_API_KEY`), and `logs/calls.log`. The server also records the last provider error on each lead.
+- **Webhook signature errors:** Ensure `VAPI_WEBHOOK_SECRET` matches VAPI dashboard settings; set it to empty during local testing if signatures aren't supported.
 - **Admin page blank:** Confirm the token is stored in `localStorage` and matches the backend's `ADMIN_TOKEN`.
-- **Ngrok not receiving events:** Double-check `WEBHOOK_PUBLIC_BASE` and the Exotel dashboard webhook URL; restart the server after changing it.
-- **AI voice integration:** For AI conversations, configure Exotel Passthru applet to connect to your AI service, or use Exotel's voice bot service. See `server/routes/callflow.js` for call flow examples.
+- **Ngrok not receiving events:** Double-check `WEBHOOK_PUBLIC_BASE` and the VAPI dashboard webhook URL; restart the server after changing it.
+- **AI voice integration:** VAPI handles AI conversations automatically. Ensure system prompt is configured correctly and check VAPI dashboard for voice/language settings.
 
 Happy selling! Maya is ready to light up your leads.
 

@@ -8,9 +8,8 @@ require('dotenv').config({ path: path.resolve(__dirname, '../.env') });
 
 const enquireRouter = require('./routes/enquire');
 const webhookRouter = require('./routes/webhook');
-const callflowRouter = require('./routes/callflow');
 const { initDb, getLeads, getLeadById, updateLead } = require('./lib/db');
-const { createCallWithRetry } = require('./lib/exotelClient');
+const { createCallWithRetry } = require('./lib/vapiClient');
 
 const app = express();
 
@@ -72,7 +71,6 @@ app.get('/health', (req, res) => {
 
 app.use('/enquire', enquiryLimiter, enquireRouter);
 app.use('/webhook', webhookRouter);
-app.use('/callflow', callflowRouter);
 
 app.get('/admin/leads', requireAdmin, async (req, res) => {
   const leads = await getLeads();
