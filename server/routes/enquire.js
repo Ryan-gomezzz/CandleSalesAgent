@@ -1,7 +1,7 @@
 const express = require('express');
 const { v4: uuid } = require('uuid');
 const { saveLead, updateLead } = require('../lib/db');
-const { createCallWithRetry } = require('../lib/vapiClient');
+const { createCallWithRetry } = require('../lib/exotelClient');
 
 const router = express.Router();
 
