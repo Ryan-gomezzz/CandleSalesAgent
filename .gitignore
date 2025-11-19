@@ -1,0 +1,14 @@
+node_modules
+dist
+.env
+.env.local
+.DS_Store
+logs/*.log
+data/*.db
+coverage
+*.sqlite
+pnpm-lock.yaml
+package-lock.json
+logs/calls.log
+
+

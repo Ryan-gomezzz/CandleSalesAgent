@@ -1,0 +1,21 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:wght@600&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  font-family: 'Inter', system-ui, sans-serif;
+  color: #2b1b12;
+  background-color: #fff6ee;
+}
+
+body {
+  min-height: 100vh;
+}
+
+.section-container {
+  @apply mx-auto w-full max-w-6xl px-4 py-12 sm:px-6 lg:px-8;
+}
+
+
