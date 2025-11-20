@@ -5,7 +5,9 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   build: {
-    outDir: process.env.VERCEL ? '../dist' : 'dist',
+    // Always output to root dist directory (one level up from frontend)
+    outDir: '../dist',
+    emptyOutDir: true,
   },
   server: {
     port: 5173,
