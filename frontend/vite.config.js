@@ -5,8 +5,8 @@ import path from 'path';
 export default defineConfig({
   plugins: [react()],
   build: {
-    // Output to dist directory within frontend (standard location)
-    outDir: 'dist',
+    // Output to root dist directory (relative to frontend, one level up)
+    outDir: '../dist',
     emptyOutDir: true,
   },
   server: {
